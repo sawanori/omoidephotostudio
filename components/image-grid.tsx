@@ -102,7 +102,7 @@ export function ImageGrid() {
     return weightedRatios[Math.floor(Math.random() * weightedRatios.length)];
   };
 
-  // 画像データ取得時にサイズとアスペクト比を付与
+  // 画像データ取得時に���イズとアスペクト比を付与
   const fetchImages = useCallback(async () => {
     try {
       setLoading(true);
@@ -250,7 +250,7 @@ export function ImageGrid() {
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors">
                       <button
                         onClick={(e) => handleLike(image.id, e)}
-                        className="absolute top-2 right-2 p-2 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute top-2 right-2 p-2 bg-black/50 rounded-full transition-opacity"
                         disabled={loadingLikes.has(image.id)}
                       >
                         {loadingLikes.has(image.id) ? (

@@ -34,6 +34,8 @@ const nextConfig = {
               img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in;
               connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://vercel.live;
               frame-src 'self' https://vercel.live;
+              worker-src 'self' blob:;
+              media-src 'self' blob:;
             `.replace(/\s+/g, ' ').trim()
           }
         ]

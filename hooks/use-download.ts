@@ -12,20 +12,23 @@ export function useDownload() {
 
   const downloadSingleImage = async (image: Image): Promise<void> => {
     try {
-      const optimizedBlob = await optimizeImage(image.url);
-      const url = URL.createObjectURL(optimizedBlob);
+      const response = await fetch(image.url);
+      const blob = await response.blob();
       
+      const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `${image.title || 'image'}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      
+      window.open(url, '_blank');
+      
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url);
+      }, 100);
 
-      // Add delay between downloads
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (error) {
+      console.error('Download error:', error);
       throw new Error(`Failed to download ${image.title}`);
     }
   };

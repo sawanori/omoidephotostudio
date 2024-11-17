@@ -27,21 +27,14 @@ const nextConfig = {
         headers: [
           {
             key: 'Content-Security-Policy',
-            value: process.env.NODE_ENV === 'development' 
-              ? `
-                default-src 'self';
-                script-src 'self' 'unsafe-inline' 'unsafe-eval';
-                style-src 'self' 'unsafe-inline';
-                img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in;
-                connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co;
-              `.replace(/\s+/g, ' ').trim()
-              : `
-                default-src 'self';
-                script-src 'self' 'wasm-unsafe-eval';
-                style-src 'self' 'unsafe-inline';
-                img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in;
-                connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co;
-              `.replace(/\s+/g, ' ').trim()
+            value: `
+              default-src 'self';
+              script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://vercel.live;
+              style-src 'self' 'unsafe-inline';
+              img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in;
+              connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://vercel.live;
+              frame-src 'self' https://vercel.live;
+            `.replace(/\s+/g, ' ').trim()
           }
         ]
       }

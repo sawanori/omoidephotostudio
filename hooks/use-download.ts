@@ -26,13 +26,47 @@ export function useDownload() {
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${image.title || 'image'}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // モバイルデバイスの判定
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      if (isMobile) {
+        // モバイルデバイスの場合
+        const image = new Image();
+        image.src = url;
+        image.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = image.width;
+          canvas.height = image.height;
+          
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+          
+          ctx.drawImage(image, 0, 0);
+          
+          // canvasをblobに変換
+          canvas.toBlob((blob) => {
+            if (blob) {
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${image.title || 'image'}.jpg`;
+              a.setAttribute('target', '_blank');
+              a.setAttribute('rel', 'noopener noreferrer');
+              a.click();
+              URL.revokeObjectURL(url);
+            }
+          }, 'image/jpeg', 0.8);
+        };
+      } else {
+        // PCの場合は従来通り
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${image.title || 'image'}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
 
       // Add delay between downloads
       await new Promise(resolve => setTimeout(resolve, 1000));

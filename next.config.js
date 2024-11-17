@@ -37,6 +37,14 @@ const nextConfig = {
               worker-src 'self' blob:;
               media-src 'self' blob:;
             `.replace(/\s+/g, ' ').trim()
+          },
+          {
+            key: 'Cross-Origin-Opener-Policy',
+            value: 'same-origin'
+          },
+          {
+            key: 'Cross-Origin-Embedder-Policy',
+            value: 'require-corp'
           }
         ]
       }

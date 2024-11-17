@@ -53,9 +53,8 @@ export function ImageGrid() {
       setLikedImages(prev => {
         const newLikedImages = new Set(prev);
         results.forEach((result, index) => {
-          const imageId = images[index].id;
           if (result.isLiked) {
-            newLikedImages.add(imageId);
+            newLikedImages.add(images[index].id);
           }
         });
         return newLikedImages;
@@ -153,8 +152,8 @@ export function ImageGrid() {
 
     if (!user) {
       toast({
-        title: 'Error',
-        description: 'Please login to like images',
+        title: 'ログインが必要です',
+        description: 'いいねするにはログインしてください',
         variant: 'destructive',
       });
       return;
@@ -172,7 +171,7 @@ export function ImageGrid() {
         body: JSON.stringify({ image_id: imageId }),
       });
 
-      if (!response.ok) throw new Error();
+      if (!response.ok) throw new Error('Failed to update like status');
 
       setLikedImages(prev => {
         const newLikes = new Set(prev);
@@ -186,9 +185,10 @@ export function ImageGrid() {
         return newLikes;
       });
     } catch (error) {
+      console.error('Like error:', error);
       toast({
-        title: 'Error',
-        description: 'Failed to update like',
+        title: 'エラー',
+        description: 'いいねの更新に失敗しました',
         variant: 'destructive',
       });
     } finally {
@@ -240,6 +240,21 @@ export function ImageGrid() {
                         onLoad={() => handleImageLoad(image.id, index)}
                         priority={index < 4}
                       />
+                    </div>
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors">
+                      <button
+                        onClick={(e) => handleLike(image.id, e)}
+                        className="absolute top-2 right-2 p-2 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                        disabled={loadingLikes.has(image.id)}
+                      >
+                        {loadingLikes.has(image.id) ? (
+                          <span className="animate-pulse">...</span>
+                        ) : likedImages.has(image.id) ? (
+                          <Heart className="h-5 w-5 text-red-500 fill-current" />
+                        ) : (
+                          <Heart className="h-5 w-5 text-white" />
+                        )}
+                      </button>
                     </div>
                   </div>
                 </Card>

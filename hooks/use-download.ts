@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useToast } from '@/components/ui/use-toast';
+import { saveAs } from 'file-saver';
 
 export type Image = {
   id: string;
@@ -26,36 +27,9 @@ export function useDownload() {
       const blob = await response.blob();
       const fileName = `${image.title || 'image'}.jpg`;
       
-      // iOSの判定
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      // FileSaverを使用してダウンロード
+      saveAs(blob, fileName);
       
-      if (isIOS && navigator.share) {
-        // Share APIを使用
-        const file = new File([blob], fileName, { type: 'image/jpeg' });
-        try {
-          await navigator.share({
-            files: [file],
-            title: fileName,
-          });
-        } catch (error) {
-          console.error('Share error:', error);
-          // Share APIが失敗した場合のフォールバック
-          const url = URL.createObjectURL(blob);
-          window.open(url, '_blank');
-          URL.revokeObjectURL(url);
-        }
-      } else {
-        // Android/PC用の既存の処理
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-
       // Add delay between downloads
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (error) {

@@ -8,14 +8,14 @@ import { Header } from '@/components/header';
 import { FloatingDownloadButton } from '@/components/floating-download-button';
 import PhotoAlbum from "react-photo-album";
 
+export const dynamic = 'force-dynamic';
+
 type Photo = {
   src: string;
   width: number;
   height: number;
   alt?: string;
 };
-
-
 
 export default function HomePage() {
   return (

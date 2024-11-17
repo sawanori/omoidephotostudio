@@ -11,7 +11,7 @@ const nextConfig = {
     ],
     domains: [
       'images.unsplash.com',
-      'your-supabase-project.supabase.co',
+      'crgswbpgbxvtrszimnmk.supabase.co',
     ],
   },
   eslint: {

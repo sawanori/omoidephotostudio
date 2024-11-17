@@ -24,44 +24,32 @@ export function useDownload() {
       if (!response.ok) throw new Error(`Failed to fetch ${image.title}`);
       
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
+      const fileName = `${image.title || 'image'}.jpg`;
       
-      // モバイルデバイスの判定
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-      if (isMobile) {
-        // モバイルデバイスの場合
-        const image = new Image();
-        image.src = url;
-        image.onload = () => {
-          const canvas = document.createElement('canvas');
-          canvas.width = image.width;
-          canvas.height = image.height;
-          
-          const ctx = canvas.getContext('2d');
-          if (!ctx) return;
-          
-          ctx.drawImage(image, 0, 0);
-          
-          // canvasをblobに変換
-          canvas.toBlob((blob) => {
-            if (blob) {
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `${image.title || 'image'}.jpg`;
-              a.setAttribute('target', '_blank');
-              a.setAttribute('rel', 'noopener noreferrer');
-              a.click();
-              URL.revokeObjectURL(url);
-            }
-          }, 'image/jpeg', 0.8);
-        };
+      // iOSの判定
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      
+      if (isIOS && navigator.share) {
+        // Share APIを使用
+        const file = new File([blob], fileName, { type: 'image/jpeg' });
+        try {
+          await navigator.share({
+            files: [file],
+            title: fileName,
+          });
+        } catch (error) {
+          console.error('Share error:', error);
+          // Share APIが失敗した場合のフォールバック
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+          URL.revokeObjectURL(url);
+        }
       } else {
-        // PCの場合は従来通り
+        // Android/PC用の既存の処理
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${image.title || 'image'}.jpg`;
+        a.download = fileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -71,6 +59,7 @@ export function useDownload() {
       // Add delay between downloads
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (error) {
+      console.error('Download error:', error);
       throw new Error(`Failed to download ${image.title}`);
     }
   };

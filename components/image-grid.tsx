@@ -41,28 +41,34 @@ export function ImageGrid() {
 
   // いいね状態を取得する関数
   const fetchLikeStatus = useCallback(async () => {
-    if (!user) return;
+    if (!user || images.length === 0) return;
 
     try {
-      const promises = images.map(image =>
-        fetch(`/api/likes?image_id=${image.id}`).then(res => res.json())
+      const results = await Promise.all(
+        images.map(async (image) => {
+          try {
+            const response = await fetch(`/api/likes?image_id=${image.id}`);
+            if (!response.ok) throw new Error('Network response was not ok');
+            return response.json();
+          } catch (error) {
+            console.error(`Error fetching like status for image ${image.id}:`, error);
+            return { isLiked: false };
+          }
+        })
       );
 
-      const results = await Promise.all(promises);
-      
-      setLikedImages(prev => {
-        const newLikedImages = new Set(prev);
-        results.forEach((result, index) => {
-          if (result.isLiked) {
-            newLikedImages.add(images[index].id);
-          }
-        });
-        return newLikedImages;
-      });
+      setLikedImages(new Set(
+        images.filter((_, index) => results[index]?.isLiked).map(img => img.id)
+      ));
     } catch (error) {
       console.error('Error fetching like status:', error);
+      toast({
+        title: 'エラー',
+        description: 'いいね状態の取得に失敗しました',
+        variant: 'destructive',
+      });
     }
-  }, [user, images]);
+  }, [user, images, toast]);
 
   // ランダムなサイズクラスを生成する関数を追加
   const getRandomSize = () => {
@@ -132,10 +138,10 @@ export function ImageGrid() {
 
   // いいね状態の取得
   useEffect(() => {
-    if (images.length > 0 && user) {
+    if (user && images.length > 0) {
       fetchLikeStatus();
     }
-  }, [images, user, fetchLikeStatus]);
+  }, [user, images, fetchLikeStatus]);
 
   const handleImageClick = (index: number) => {
     setSelectedImageIndex(index);

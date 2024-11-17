@@ -28,6 +28,11 @@ export async function GET(request: Request) {
       .eq('image_id', image_id)
       .single();
 
+    if (error && error.code !== 'PGRST116') {
+      console.error('Database error:', error);
+      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+    }
+
     return NextResponse.json({ isLiked: !!data });
   } catch (error) {
     console.error('Error checking like status:', error);

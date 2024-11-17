@@ -65,17 +65,25 @@ export function FloatingDownloadButton() {
     }
 
     try {
-      const { data: likedImages, error } = await supabase
-        .from('user_liked_images')
-        .select('*')
+      // まずlikesテーブルから画像IDを取得
+      const { data: likes, error: likesError } = await supabase
+        .from('likes')
+        .select('image_id')
         .eq('user_id', user.id);
 
-      if (error) throw error;
+      if (likesError) throw likesError;
 
-      if (likedImages && likedImages.length > 0) {
-        // データ形式を変換
-        const images = likedImages.map(image => ({
-          id: image.image_id,
+      // 画像の詳細情報を取得
+      const { data: images, error: imagesError } = await supabase
+        .from('images')
+        .select('*')
+        .in('id', likes.map(like => like.image_id));
+
+      if (imagesError) throw imagesError;
+
+      if (images && images.length > 0) {
+        const formattedImages = images.map(image => ({
+          id: image.id,
           title: image.title,
           url: image.url,
           description: image.description,
@@ -84,13 +92,13 @@ export function FloatingDownloadButton() {
           updated_at: image.updated_at
         }));
         
-        await downloadImages(images);
+        await downloadImages(formattedImages);
       }
     } catch (error) {
       console.error('Error fetching liked images:', error);
       toast({
-        title: 'Error',
-        description: 'Failed to fetch liked images',
+        title: 'エラー',
+        description: 'ダウンロードに失敗しました',
         variant: 'destructive',
       });
     }

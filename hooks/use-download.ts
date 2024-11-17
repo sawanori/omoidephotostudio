@@ -2,8 +2,16 @@
 
 import { useState } from 'react';
 import { useToast } from '@/components/ui/use-toast';
-import { Image } from '@/lib/types';
-import { optimizeImage } from '@/utils/image-optimizer';
+
+export type Image = {
+  id: string;
+  title: string;
+  url: string;
+  description?: string;
+  storage_path: string;
+  created_at: string;
+  updated_at: string;
+};
 
 export function useDownload() {
   const [isDownloading, setIsDownloading] = useState(false);
@@ -13,22 +21,22 @@ export function useDownload() {
   const downloadSingleImage = async (image: Image): Promise<void> => {
     try {
       const response = await fetch(image.url);
-      const blob = await response.blob();
+      if (!response.ok) throw new Error(`Failed to fetch ${image.title}`);
       
-      const url = window.URL.createObjectURL(blob);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      
       const a = document.createElement('a');
       a.href = url;
       a.download = `${image.title || 'image'}.jpg`;
-      
-      window.open(url, '_blank');
-      
-      setTimeout(() => {
-        window.URL.revokeObjectURL(url);
-      }, 100);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
 
+      // Add delay between downloads
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (error) {
-      console.error('Download error:', error);
       throw new Error(`Failed to download ${image.title}`);
     }
   };
@@ -83,6 +91,6 @@ export function useDownload() {
   return {
     downloadImages,
     isDownloading,
-    progress,
+    progress
   };
 }

@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/components/auth/auth-provider';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { createClient } from '@supabase/supabase-js'
 
 export function SignupForm() {
   const [email, setEmail] = useState('');
@@ -24,43 +25,27 @@ export function SignupForm() {
     setIsLoading(true);
 
     try {
-      if (password !== confirmPassword) {
-        toast({
-          title: 'Error',
-          description: 'Passwords do not match',
-          variant: 'destructive',
-        });
-        return;
-      }
+      const origin = window.location.origin;
+      const redirectUrl = `${origin}/auth/callback`;
+      
+      console.log('Redirect URL:', redirectUrl); // デバッグ用
 
-      const { error, needsEmailConfirmation } = await signup(email.trim(), password.trim());
+      const { data, error } = await signup(email.trim(), password.trim());
 
       if (error) {
-        toast({
-          title: 'Error',
-          description: error.message,
-          variant: 'destructive',
-        });
-        return;
+        throw error;
       }
 
-      if (needsEmailConfirmation) {
-        toast({
-          title: '成功',
-          description: 'メールアドレスに認証メールを送信しましたのでメールに添付された認証リンクをクリックしてください。',
-        });
-      } else {
-        toast({
-          title: '成功',
-          description: 'サインイン成功',
-        });
-      }
-
-      router.push('/login');
-    } catch (error: any) {
       toast({
-        title: 'Error',
-        description: error.message || 'Something went wrong',
+        title: '確認メールを送信しました',
+        description: 'メールを確認して登録を完了してください',
+      });
+
+    } catch (error: any) {
+      console.error('Signup error:', error);
+      toast({
+        title: 'エラー',
+        description: error.message || '登録に失敗しました',
         variant: 'destructive',
       });
     } finally {

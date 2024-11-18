@@ -102,7 +102,7 @@ export function ImageGrid() {
     return weightedRatios[Math.floor(Math.random() * weightedRatios.length)];
   };
 
-  // 画像データ取得時に���イズとアスペクト比を付与
+  // 画像データ取得時にイズとアスペクト比を付与
   const fetchImages = useCallback(async () => {
     try {
       setLoading(true);
@@ -241,6 +241,7 @@ export function ImageGrid() {
                         src={image.url}
                         alt={image.title}
                         fill
+                        quality={75}
                         className="object-cover transition-transform duration-200 group-hover:scale-105"
                         sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
                         onLoad={() => handleImageLoad(image.id, index)}

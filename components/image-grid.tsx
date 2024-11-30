@@ -196,11 +196,22 @@ export function ImageGrid() {
     try {
       setError(null);
       const from = (pageNum - 1) * (pageNum === 1 ? INITIAL_LOAD_COUNT : LOAD_MORE_COUNT);
-      const to = from + (pageNum === 1 ? INITIAL_LOAD_COUNT : LOAD_MORE_COUNT) - 1;
-
-      const { data, error: fetchError, count } = await supabase
+      
+      // 最大件数を超えないようにチェック
+      const { count: totalCount } = await supabase
         .from('images')
-        .select('*', { count: 'exact' })
+        .select('*', { count: 'exact', head: true });
+
+      if (totalCount === null || from >= totalCount) {
+        setHasMore(false);
+        return;
+      }
+
+      const to = Math.min(from + (pageNum === 1 ? INITIAL_LOAD_COUNT : LOAD_MORE_COUNT) - 1, totalCount - 1);
+
+      const { data, error: fetchError } = await supabase
+        .from('images')
+        .select('*')
         .order('created_at', { ascending: false })
         .range(from, to);
 
@@ -214,7 +225,7 @@ export function ImageGrid() {
               const { data: signedUrlData, error: signedUrlError } = await supabase
                 .storage
                 .from('photo-gallery-images')
-                .createSignedUrl(image.storage_path, 60);
+                .createSignedUrl(image.storage_path, 3600); // 有効期限を1時間に延長
 
               if (signedUrlError) throw signedUrlError;
 
@@ -236,7 +247,7 @@ export function ImageGrid() {
         );
 
         setImages(prev => pageNum === 1 ? imagesWithSignedUrls : [...prev, ...imagesWithSignedUrls]);
-        setHasMore(count ? from + data.length < count : false);
+        setHasMore(to < totalCount - 1);
         setRetryCount(0); // 成功したらリトライカウントをリセット
       }
     } catch (error) {

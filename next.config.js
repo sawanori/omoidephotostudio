@@ -33,11 +33,11 @@ const nextConfig = {
             key: 'Content-Security-Policy',
             value: `
               default-src 'self';
-              script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://vercel.live;
+              script-src 'self' 'unsafe-inline' 'unsafe-eval';
               style-src 'self' 'unsafe-inline';
               img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in;
-              connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://vercel.live;
-              frame-src 'self' https://vercel.live;
+              connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co;
+              frame-src 'self';
               worker-src 'self' blob:;
               media-src 'self' blob:;
             `.replace(/\s+/g, ' ').trim()
@@ -48,7 +48,11 @@ const nextConfig = {
           },
           {
             key: 'Cross-Origin-Embedder-Policy',
-            value: 'require-corp'
+            value: 'credentialless'
+          },
+          {
+            key: 'Access-Control-Allow-Origin',
+            value: '*'
           }
         ]
       }

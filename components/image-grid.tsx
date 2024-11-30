@@ -67,26 +67,51 @@ export function ImageGrid() {
     if (!user || images.length === 0) return;
 
     try {
-      // 全ての画像IDを一度に送信
-      const imageIds = images.map(img => img.id);
-      const response = await fetch('/api/likes/batch', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ imageIds }),
-      });
+      // バッチ処理：一度に5つずつ処理
+      const batchSize = 5;
+      const batches = Math.ceil(images.length / batchSize);
+      const likedImageIds = new Set<string>();
 
-      if (!response.ok) throw new Error('Network response was not ok');
-      
-      const data = await response.json();
-      setLikedImages(new Set(data.likedImageIds));
+      for (let i = 0; i < batches; i++) {
+        const start = i * batchSize;
+        const end = Math.min(start + batchSize, images.length);
+        const batchImages = images.slice(start, end);
+
+        const results = await Promise.all(
+          batchImages.map(async (image) => {
+            try {
+              const response = await fetch(`/api/likes?image_id=${image.id}`);
+              if (!response.ok) throw new Error('Network response was not ok');
+              return response.json();
+            } catch (error) {
+              console.error(`Error fetching like status for image ${image.id}:`, error);
+              return { isLiked: false };
+            }
+          })
+        );
+
+        results.forEach((result, index) => {
+          if (result?.isLiked) {
+            likedImageIds.add(batchImages[index].id);
+          }
+        });
+
+        // バッチ間で少し待機
+        if (i < batches - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      setLikedImages(likedImageIds);
     } catch (error) {
       console.error('Error fetching like status:', error);
-      // エラー時は静かに失敗（UIへの影響を最小限に）
-      setLikedImages(new Set());
+      toast({
+        title: 'エラー',
+        description: 'いいね状態の取得に失敗しました',
+        variant: 'destructive',
+      });
     }
-  }, [user, images]);
+  }, [user, images, toast]);
 
   // 画像の読み込み完了を追跡する関数
   const handleImageLoad = (imageId: string) => {
@@ -361,11 +386,11 @@ export function ImageGrid() {
               className="flex -ml-4 w-auto"
               columnClassName="pl-4 bg-clip-padding"
             >
-              {images.map((image, index) => (
+              {images.map((image) => (
                 <div 
-                  key={image.id} 
+                  key={`${image.id}-${image.url}`} 
                   className="mb-4 cursor-pointer"
-                  onClick={() => handleImageClick(index)}
+                  onClick={() => handleImageClick(images.findIndex(img => img.id === image.id))}
                 >
                   <Card className="overflow-hidden group hover:shadow-lg transition-shadow duration-200">
                     <div className="relative">
@@ -395,26 +420,23 @@ export function ImageGrid() {
                             sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
                             onLoad={() => handleImageLoad(image.id)}
                             onError={() => handleImageError(image.id)}
-                            loading={index < 4 ? "eager" : "lazy"}
-                            placeholder="blur"
-                            blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDABQODxIPDRQSEBIXFRQdHx4eHRoaHSQrJiEkKic0Ly4vLy4vNDk2ODU4Ni8vQUFBQC9JWTI/SVpwWnGNkY3/2wBDARUXFx4aHR4eHUJBQkFGQ0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkb/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAb/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k="
                           />
                         )}
-                      </div>
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors">
-                        <button
-                          onClick={(e) => handleLike(image.id, e)}
-                          className="absolute top-2 right-2 p-2 bg-black/50 rounded-full transition-opacity"
-                          disabled={loadingLikes.has(image.id)}
-                        >
-                          {loadingLikes.has(image.id) ? (
-                            <span className="animate-pulse">...</span>
-                          ) : likedImages.has(image.id) ? (
-                            <Heart className="h-5 w-5 text-red-500 fill-current" />
-                          ) : (
-                            <Heart className="h-5 w-5 text-white" />
-                          )}
-                        </button>
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors">
+                          <button
+                            onClick={(e) => handleLike(image.id, e)}
+                            className="absolute top-2 right-2 p-2 bg-black/50 rounded-full transition-opacity"
+                            disabled={loadingLikes.has(image.id)}
+                          >
+                            {loadingLikes.has(image.id) ? (
+                              <span className="animate-pulse">...</span>
+                            ) : likedImages.has(image.id) ? (
+                              <Heart className="h-5 w-5 text-red-500 fill-current" />
+                            ) : (
+                              <Heart className="h-5 w-5 text-white" />
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </Card>

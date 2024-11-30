@@ -221,6 +221,7 @@ export function ImageGrid() {
 
       if (totalCount === null || from >= totalCount) {
         setHasMore(false);
+        setLoading(false);
         return;
       }
 
@@ -235,12 +236,11 @@ export function ImageGrid() {
       if (fetchError) throw fetchError;
 
       if (data) {
-        console.log('Fetched images:', data); // デバッグログ
+        console.log('Fetched images:', data);
 
         const imagesWithSignedUrls = await Promise.all(
           data.map(async (image) => {
             try {
-              // storage_pathが存在することを確認
               if (!image.storage_path) {
                 console.error('Missing storage_path for image:', image);
                 throw new Error('Missing storage_path');
@@ -261,8 +261,6 @@ export function ImageGrid() {
                 throw new Error('No signed URL returned');
               }
 
-              console.log('Generated signed URL for image:', image.id, signedUrlData.signedUrl); // デバッグログ
-
               return {
                 ...image,
                 url: signedUrlData.signedUrl,
@@ -271,30 +269,38 @@ export function ImageGrid() {
               };
             } catch (error) {
               console.error('Error processing image:', image.id, error);
-              // エラーが発生した場合でも、既存のURLを使
-              return {
-                ...image,
-                url: image.url || '',
-                size: Math.random() > 0.2 ? 'normal' : 'large',
-                aspectRatio: getRandomAspectRatio(Math.random() > 0.2 ? 'normal' : 'large')
-              };
+              return null;
             }
           })
         );
 
-        console.log('Processed images with URLs:', imagesWithSignedUrls); // デバッグログ
+        // フィルタリングして、エラーのあった画像を除外
+        const validImages = imagesWithSignedUrls.filter((img): img is ImageType => img !== null);
+        console.log('Valid images with URLs:', validImages);
+
+        if (validImages.length === 0) {
+          setError('画像の読み込みに失敗しました。');
+          setLoading(false);
+          return;
+        }
 
         setImages(prev => {
-          const newImages = pageNum === 1 ? imagesWithSignedUrls : [...prev, ...imagesWithSignedUrls];
-          // 新しい画像が追加されたら、いいね状態を再取得
-          if (user && newImages.length > prev.length) {
-            fetchLikeStatus();
-          }
+          const newImages = pageNum === 1 ? validImages : [...prev, ...validImages];
           return newImages;
         });
+
+        // 最初のページで、かつ画像が存在する場合はローディングを解除
+        if (pageNum === 1 && validImages.length > 0) {
+          setLoading(false);
+        }
         
         setHasMore(to < totalCount - 1);
         setRetryCount(0);
+
+        // いいね状態を更新
+        if (user) {
+          fetchLikeStatus();
+        }
       }
     } catch (error) {
       console.error('Error fetching images:', error);
@@ -304,17 +310,20 @@ export function ImageGrid() {
         description: '画像の読み込みに失敗しました',
         variant: 'destructive',
       });
+      setLoading(false);
     }
   }, [supabase, toast, user, fetchLikeStatus]);
 
   // 初回読み込み
   useEffect(() => {
+    console.log('Initial fetch triggered');
     fetchImages(1);
   }, [fetchImages]);
 
   // 無限スクロール
   useEffect(() => {
     if (inView && !loading && hasMore && !error) {
+      console.log('Loading more images', { page: page + 1 });
       setPage(prev => prev + 1);
       fetchImages(page + 1);
     }

@@ -67,51 +67,26 @@ export function ImageGrid() {
     if (!user || images.length === 0) return;
 
     try {
-      // バッチ処理：一度に5つずつ処理
-      const batchSize = 5;
-      const batches = Math.ceil(images.length / batchSize);
-      const likedImageIds = new Set<string>();
+      // 全ての画像IDを一度に送信
+      const imageIds = images.map(img => img.id);
+      const response = await fetch('/api/likes/batch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ imageIds }),
+      });
 
-      for (let i = 0; i < batches; i++) {
-        const start = i * batchSize;
-        const end = Math.min(start + batchSize, images.length);
-        const batchImages = images.slice(start, end);
-
-        const results = await Promise.all(
-          batchImages.map(async (image) => {
-            try {
-              const response = await fetch(`/api/likes?image_id=${image.id}`);
-              if (!response.ok) throw new Error('Network response was not ok');
-              return response.json();
-            } catch (error) {
-              console.error(`Error fetching like status for image ${image.id}:`, error);
-              return { isLiked: false };
-            }
-          })
-        );
-
-        results.forEach((result, index) => {
-          if (result?.isLiked) {
-            likedImageIds.add(batchImages[index].id);
-          }
-        });
-
-        // バッチ間で少し待機
-        if (i < batches - 1) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      }
-
-      setLikedImages(likedImageIds);
+      if (!response.ok) throw new Error('Network response was not ok');
+      
+      const data = await response.json();
+      setLikedImages(new Set(data.likedImageIds));
     } catch (error) {
       console.error('Error fetching like status:', error);
-      toast({
-        title: 'エラー',
-        description: 'いいね状態の取得に失敗しました',
-        variant: 'destructive',
-      });
+      // エラー時は静かに失敗（UIへの影響を最小限に）
+      setLikedImages(new Set());
     }
-  }, [user, images, toast]);
+  }, [user, images]);
 
   // 画像の読み込み完了を追跡する関数
   const handleImageLoad = (imageId: string) => {

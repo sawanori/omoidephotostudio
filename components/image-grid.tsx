@@ -62,56 +62,70 @@ export function ImageGrid() {
     return weightedRatios[Math.floor(Math.random() * weightedRatios.length)];
   };
 
-  // いいね状態を取得する関数
+  // いいね状態を取得する関数を最適化
   const fetchLikeStatus = useCallback(async () => {
     if (!user || images.length === 0) return;
 
     try {
-      // バッチ処理：一度に5つずつ処理
-      const batchSize = 5;
-      const batches = Math.ceil(images.length / batchSize);
-      const likedImageIds = new Set<string>();
+      // 全ての画像IDを一度に送信
+      const imageIds = images.map(img => img.id);
+      const response = await fetch('/api/likes/batch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ imageIds }),
+      });
 
-      for (let i = 0; i < batches; i++) {
-        const start = i * batchSize;
-        const end = Math.min(start + batchSize, images.length);
-        const batchImages = images.slice(start, end);
-
-        const results = await Promise.all(
-          batchImages.map(async (image) => {
-            try {
-              const response = await fetch(`/api/likes?image_id=${image.id}`);
-              if (!response.ok) throw new Error('Network response was not ok');
-              return response.json();
-            } catch (error) {
-              console.error(`Error fetching like status for image ${image.id}:`, error);
-              return { isLiked: false };
-            }
-          })
-        );
-
-        results.forEach((result, index) => {
-          if (result?.isLiked) {
-            likedImageIds.add(batchImages[index].id);
-          }
-        });
-
-        // バッチ間で少し待機
-        if (i < batches - 1) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      }
-
-      setLikedImages(likedImageIds);
+      if (!response.ok) throw new Error('Network response was not ok');
+      
+      const data = await response.json();
+      setLikedImages(new Set(data.likedImageIds));
     } catch (error) {
       console.error('Error fetching like status:', error);
-      toast({
-        title: 'エラー',
-        description: 'いいね状態の取得に失敗しました',
-        variant: 'destructive',
-      });
+      // エラー時は静かに失敗（UIへの影響を最小限に）
     }
-  }, [user, images, toast]);
+  }, [user, images]);
+
+  // リアルタイム更新のセットアップ
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('public:likes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'likes',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setLikedImages(prev => new Set(Array.from(prev).concat(payload.new.image_id)));
+          } else if (payload.eventType === 'DELETE') {
+            setLikedImages(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(payload.old.image_id);
+              return newSet;
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, supabase]);
+
+  // いいね状態の取得タイミングを調整
+  useEffect(() => {
+    if (user && !loading) {
+      fetchLikeStatus();
+    }
+  }, [user, loading, fetchLikeStatus]);
 
   // 画像の読み込み完了を追跡する関数
   const handleImageLoad = (imageId: string) => {
@@ -191,13 +205,12 @@ export function ImageGrid() {
     await fetchImages(1);
   };
 
-  // 画像データの取得（ページネーション対応）
+  // 画像データの取得を最適化
   const fetchImages = useCallback(async (pageNum: number) => {
     try {
       setError(null);
       const from = (pageNum - 1) * (pageNum === 1 ? INITIAL_LOAD_COUNT : LOAD_MORE_COUNT);
       
-      // 最大件数を超えないようにチェック
       const { count: totalCount } = await supabase
         .from('images')
         .select('*', { count: 'exact', head: true });
@@ -218,14 +231,13 @@ export function ImageGrid() {
       if (fetchError) throw fetchError;
 
       if (data) {
-        // 署名付きURLを取得
         const imagesWithSignedUrls = await Promise.all(
           data.map(async (image) => {
             try {
               const { data: signedUrlData, error: signedUrlError } = await supabase
                 .storage
                 .from('photo-gallery-images')
-                .createSignedUrl(image.storage_path, 3600); // 有効期限を1時間に延長
+                .createSignedUrl(image.storage_path, 3600);
 
               if (signedUrlError) throw signedUrlError;
 
@@ -246,9 +258,17 @@ export function ImageGrid() {
           })
         );
 
-        setImages(prev => pageNum === 1 ? imagesWithSignedUrls : [...prev, ...imagesWithSignedUrls]);
+        setImages(prev => {
+          const newImages = pageNum === 1 ? imagesWithSignedUrls : [...prev, ...imagesWithSignedUrls];
+          // 新しい画像が追加されたら、いいね状態を再取得
+          if (user && newImages.length > prev.length) {
+            fetchLikeStatus();
+          }
+          return newImages;
+        });
+        
         setHasMore(to < totalCount - 1);
-        setRetryCount(0); // 成功したらリトライカウントをリセット
+        setRetryCount(0);
       }
     } catch (error) {
       console.error('Error fetching images:', error);
@@ -261,7 +281,7 @@ export function ImageGrid() {
     } finally {
       setLoading(false);
     }
-  }, [supabase, toast]);
+  }, [supabase, toast, user, fetchLikeStatus]);
 
   // 初回読み込み
   useEffect(() => {
@@ -275,13 +295,6 @@ export function ImageGrid() {
       fetchImages(page + 1);
     }
   }, [inView, loading, hasMore, fetchImages, page, error]);
-
-  // いいね状態の取得
-  useEffect(() => {
-    if (user && images.length > 0) {
-      fetchLikeStatus();
-    }
-  }, [user, images, fetchLikeStatus]);
 
   const handleImageClick = (index: number) => {
     setSelectedImageIndex(index);

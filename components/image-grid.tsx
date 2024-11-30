@@ -41,6 +41,7 @@ export function ImageGrid() {
   const { toast } = useToast();
   const [likedImages, setLikedImages] = useState<Set<string>>(new Set());
   const [loadingLikes, setLoadingLikes] = useState<Set<string>>(new Set());
+  const loadedImagesRef = useRef<Set<string>>(new Set());
 
   // アスペクト比の設定を調整
   const getRandomAspectRatio = (size: 'normal' | 'large') => {
@@ -127,36 +128,31 @@ export function ImageGrid() {
     }
   }, [user, loading, fetchLikeStatus]);
 
-  // 画像の読み込み完了を追跡する関数
-  const handleImageLoad = (imageId: string) => {
-    setLoadedImages(prev => {
-      const newSet = new Set(prev);
-      newSet.add(imageId);
-      if (newSet.size >= 4 || newSet.size === images.length) {
-        setLoading(false);
-      }
-      return newSet;
-    });
+  // 画像の読み込み完了を追跡する関数を最適化
+  const handleImageLoad = useCallback((imageId: string) => {
+    loadedImagesRef.current.add(imageId);
+    
+    // 最初の数枚が読み込まれたらローディング状態を解除
+    if (loadedImagesRef.current.size >= 4 || loadedImagesRef.current.size === images.length) {
+      setLoading(false);
+    }
+
     // 読み込みに成功した画像をfailedImagesから削除
     setFailedImages(prev => {
       const newSet = new Set(prev);
       newSet.delete(imageId);
       return newSet;
     });
-  };
+  }, [images.length]);
 
-  // 画像の読み込みエラーを処理する関数
-  const handleImageError = (imageId: string) => {
+  // 画像の読み込みエラーを処理する関数を最適化
+  const handleImageError = useCallback((imageId: string) => {
     console.error(`Failed to load image: ${imageId}`);
-    setFailedImages(prev => {
-      const newSet = new Set(prev);
-      newSet.add(imageId);
-      return newSet;
-    });
-  };
+    setFailedImages(prev => new Set(prev).add(imageId));
+  }, []);
 
-  // 画像の再読み込みを試みる関数
-  const handleRetryLoad = async (imageId: string) => {
+  // 画像の再読み込みを試みる関数を最適化
+  const handleRetryLoad = useCallback(async (imageId: string) => {
     try {
       setFailedImages(prev => {
         const newSet = new Set(prev);
@@ -164,15 +160,18 @@ export function ImageGrid() {
         return newSet;
       });
 
-      // 画像のURLを再取得
+      const image = images.find(img => img.id === imageId);
+      if (!image?.storage_path) {
+        throw new Error('Image storage path not found');
+      }
+
       const { data: imageData, error: imageError } = await supabase
         .storage
         .from('photo-gallery-images')
-        .createSignedUrl(images.find(img => img.id === imageId)?.storage_path || '', 60);
+        .createSignedUrl(image.storage_path, 3600);
 
       if (imageError) throw imageError;
 
-      // 画像URLを更新
       setImages(prev => prev.map(img => 
         img.id === imageId 
           ? { ...img, url: imageData.signedUrl }
@@ -183,7 +182,7 @@ export function ImageGrid() {
       console.error('Error retrying image load:', error);
       handleImageError(imageId);
     }
-  };
+  }, [images, supabase, handleImageError]);
 
   // 全体の再読み込みを試みる関数
   const handleRetryAll = async () => {
@@ -208,6 +207,11 @@ export function ImageGrid() {
   // 画像データの取得を最適化
   const fetchImages = useCallback(async (pageNum: number) => {
     try {
+      if (pageNum === 1) {
+        setLoading(true);
+        loadedImagesRef.current = new Set();
+      }
+      
       setError(null);
       const from = (pageNum - 1) * (pageNum === 1 ? INITIAL_LOAD_COUNT : LOAD_MORE_COUNT);
       
@@ -300,8 +304,6 @@ export function ImageGrid() {
         description: '画像の読み込みに失敗しました',
         variant: 'destructive',
       });
-    } finally {
-      setLoading(false);
     }
   }, [supabase, toast, user, fetchLikeStatus]);
 

@@ -271,7 +271,7 @@ export function ImageGrid() {
               };
             } catch (error) {
               console.error('Error processing image:', image.id, error);
-              // エラーが発生した場合でも、既存のURLを使用
+              // エラーが発生した場合でも、既存のURLを使
               return {
                 ...image,
                 url: image.url || '',

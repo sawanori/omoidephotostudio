@@ -33,7 +33,7 @@ export default function HomePage() {
             </Suspense>
           </TabsContent>
           <TabsContent value="liked">
-            <Suspense fallback={<div>読み込み中...</div>}>
+            <Suspense fallback={<div>読み込み中..</div>}>
               <LikedImages />
             </Suspense>
           </TabsContent>

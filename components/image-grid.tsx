@@ -17,6 +17,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 const INITIAL_LOAD_COUNT = 8;
 const LOAD_MORE_COUNT = 6;
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 2000; // 2秒
 
 export function ImageGrid() {
   const [images, setImages] = useState<ImageType[]>([]);
@@ -26,6 +28,7 @@ export function ImageGrid() {
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
+  const [retryCount, setRetryCount] = useState(0);
   const { ref: loadMoreRef, inView } = useInView({
     threshold: 0,
     rootMargin: '100px',
@@ -39,48 +42,24 @@ export function ImageGrid() {
   const [likedImages, setLikedImages] = useState<Set<string>>(new Set());
   const [loadingLikes, setLoadingLikes] = useState<Set<string>>(new Set());
 
-  // 画像の読み込み完了を追跡する関数
-  const handleImageLoad = (imageId: string) => {
-    setLoadedImages(prev => {
-      const newSet = new Set(prev);
-      newSet.add(imageId);
-      if (newSet.size >= 4 || newSet.size === images.length) {
-        setLoading(false);
-      }
-      return newSet;
-    });
-    // 読み込みに成功した画像をfailedImagesから削除
-    setFailedImages(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(imageId);
-      return newSet;
-    });
-  };
-
-  // 画像の読み込みエラーを処理する関数
-  const handleImageError = (imageId: string) => {
-    setFailedImages(prev => {
-      const newSet = new Set(prev);
-      newSet.add(imageId);
-      return newSet;
-    });
-    console.error(`Failed to load image: ${imageId}`);
-  };
-
-  // 画像の再読み込みを試みる関数
-  const handleRetryLoad = (imageId: string) => {
-    setFailedImages(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(imageId);
-      return newSet;
-    });
-    // 画像のキャッシュをバイパスするためにURLにタイムスタンプを追加
-    const image = images.find(img => img.id === imageId);
-    if (image) {
-      const timestamp = new Date().getTime();
-      image.url = `${image.url}?t=${timestamp}`;
-      setImages([...images]);
+  // アスペクト比の設定を調整
+  const getRandomAspectRatio = (size: 'normal' | 'large') => {
+    if (size === 'large') {
+      const ratios = ['aspect-[16/9]', 'aspect-square'];
+      return ratios[Math.floor(Math.random() * ratios.length)];
     }
+
+    const ratios = [
+      { class: 'aspect-[3/4]', weight: 2 },
+      { class: 'aspect-[4/3]', weight: 1 },
+      { class: 'aspect-square', weight: 1 }
+    ];
+
+    const weightedRatios = ratios.flatMap(ratio => 
+      Array(ratio.weight).fill(ratio.class)
+    );
+
+    return weightedRatios[Math.floor(Math.random() * weightedRatios.length)];
   };
 
   // いいね状態を取得する関数
@@ -114,24 +93,82 @@ export function ImageGrid() {
     }
   }, [user, images, toast]);
 
-  // アスペクト比の設定を調整
-  const getRandomAspectRatio = (size: 'normal' | 'large') => {
-    if (size === 'large') {
-      const ratios = ['aspect-[16/9]', 'aspect-square'];
-      return ratios[Math.floor(Math.random() * ratios.length)];
+  // 画像の読み込み完了を追跡する関数
+  const handleImageLoad = (imageId: string) => {
+    setLoadedImages(prev => {
+      const newSet = new Set(prev);
+      newSet.add(imageId);
+      if (newSet.size >= 4 || newSet.size === images.length) {
+        setLoading(false);
+      }
+      return newSet;
+    });
+    // 読み込みに成功した画像をfailedImagesから削除
+    setFailedImages(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(imageId);
+      return newSet;
+    });
+  };
+
+  // 画像の読み込みエラーを処理する関数
+  const handleImageError = (imageId: string) => {
+    console.error(`Failed to load image: ${imageId}`);
+    setFailedImages(prev => {
+      const newSet = new Set(prev);
+      newSet.add(imageId);
+      return newSet;
+    });
+  };
+
+  // 画像の再読み込みを試みる関数
+  const handleRetryLoad = async (imageId: string) => {
+    try {
+      setFailedImages(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(imageId);
+        return newSet;
+      });
+
+      // 画像のURLを再取得
+      const { data: imageData, error: imageError } = await supabase
+        .storage
+        .from('photo-gallery-images')
+        .createSignedUrl(images.find(img => img.id === imageId)?.storage_path || '', 60);
+
+      if (imageError) throw imageError;
+
+      // 画像URLを更新
+      setImages(prev => prev.map(img => 
+        img.id === imageId 
+          ? { ...img, url: imageData.signedUrl }
+          : img
+      ));
+
+    } catch (error) {
+      console.error('Error retrying image load:', error);
+      handleImageError(imageId);
+    }
+  };
+
+  // 全体の再読み込みを試みる関数
+  const handleRetryAll = async () => {
+    if (retryCount >= MAX_RETRIES) {
+      toast({
+        title: 'エラー',
+        description: '読み込みに失敗しました。時間をおいて再度お試しください。',
+        variant: 'destructive',
+      });
+      return;
     }
 
-    const ratios = [
-      { class: 'aspect-[3/4]', weight: 2 },
-      { class: 'aspect-[4/3]', weight: 1 },
-      { class: 'aspect-square', weight: 1 }
-    ];
-
-    const weightedRatios = ratios.flatMap(ratio => 
-      Array(ratio.weight).fill(ratio.class)
-    );
-
-    return weightedRatios[Math.floor(Math.random() * weightedRatios.length)];
+    setRetryCount(prev => prev + 1);
+    setError(null);
+    setLoading(true);
+    
+    // 少し待ってから再試行
+    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+    await fetchImages(1);
   };
 
   // 画像データの取得（ページネーション対応）
@@ -141,23 +178,46 @@ export function ImageGrid() {
       const from = (pageNum - 1) * (pageNum === 1 ? INITIAL_LOAD_COUNT : LOAD_MORE_COUNT);
       const to = from + (pageNum === 1 ? INITIAL_LOAD_COUNT : LOAD_MORE_COUNT) - 1;
 
-      const { data, error, count } = await supabase
+      const { data, error: fetchError, count } = await supabase
         .from('images')
         .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(from, to);
 
-      if (error) throw error;
+      if (fetchError) throw fetchError;
 
       if (data) {
-        const imagesWithProperties = data.map(image => ({
-          ...image,
-          size: Math.random() > 0.2 ? 'normal' : 'large',
-          aspectRatio: getRandomAspectRatio(Math.random() > 0.2 ? 'normal' : 'large')
-        }));
+        // 署名付きURLを取得
+        const imagesWithSignedUrls = await Promise.all(
+          data.map(async (image) => {
+            try {
+              const { data: signedUrlData, error: signedUrlError } = await supabase
+                .storage
+                .from('photo-gallery-images')
+                .createSignedUrl(image.storage_path, 60);
 
-        setImages(prev => pageNum === 1 ? imagesWithProperties : [...prev, ...imagesWithProperties]);
+              if (signedUrlError) throw signedUrlError;
+
+              return {
+                ...image,
+                url: signedUrlData.signedUrl,
+                size: Math.random() > 0.2 ? 'normal' : 'large',
+                aspectRatio: getRandomAspectRatio(Math.random() > 0.2 ? 'normal' : 'large')
+              };
+            } catch (error) {
+              console.error('Error getting signed URL:', error);
+              return {
+                ...image,
+                size: Math.random() > 0.2 ? 'normal' : 'large',
+                aspectRatio: getRandomAspectRatio(Math.random() > 0.2 ? 'normal' : 'large')
+              };
+            }
+          })
+        );
+
+        setImages(prev => pageNum === 1 ? imagesWithSignedUrls : [...prev, ...imagesWithSignedUrls]);
         setHasMore(count ? from + data.length < count : false);
+        setRetryCount(0); // 成功したらリトライカウントをリセット
       }
     } catch (error) {
       console.error('Error fetching images:', error);
@@ -270,7 +330,17 @@ export function ImageGrid() {
         {error && (
           <Alert variant="destructive" className="mb-4">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>
+              {error}
+              <Button
+                variant="link"
+                className="ml-2 text-sm underline"
+                onClick={handleRetryAll}
+                disabled={retryCount >= MAX_RETRIES}
+              >
+                再読み込みする
+              </Button>
+            </AlertDescription>
           </Alert>
         )}
 

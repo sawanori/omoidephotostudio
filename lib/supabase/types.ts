@@ -17,15 +17,8 @@ export interface Image {
   storage_path: string;
   created_at: string;
   updated_at: string;
-}
-
-export interface Image {
-  id: string;
-  title: string;
-  description?: string;
-  url: string;
-  created_at: string;
-  user_id?: string;
+  aspectRatio?: string;
+  size?: 'normal' | 'large';
 }
 
 export interface Like {

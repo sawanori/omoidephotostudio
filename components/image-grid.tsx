@@ -6,16 +6,17 @@ import Image from 'next/image';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Card } from '@/components/ui/card';
-import { Heart, Loader2 } from 'lucide-react';
+import { Heart, Loader2, AlertCircle } from 'lucide-react';
 import { ImageModal } from '@/components/image-modal';
 import { Image as ImageType } from '@/lib/supabase/types';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/components/auth/auth-provider';
 import { useToast } from '@/components/ui/use-toast';
 import { useLikeStore } from '@/lib/store/like-store';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
-const INITIAL_LOAD_COUNT = 12;
-const LOAD_MORE_COUNT = 8;
+const INITIAL_LOAD_COUNT = 8;
+const LOAD_MORE_COUNT = 6;
 
 export function ImageGrid() {
   const [images, setImages] = useState<ImageType[]>([]);
@@ -23,6 +24,8 @@ export function ImageGrid() {
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState(1);
+  const [error, setError] = useState<string | null>(null);
+  const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
   const { ref: loadMoreRef, inView } = useInView({
     threshold: 0,
     rootMargin: '100px',
@@ -46,6 +49,38 @@ export function ImageGrid() {
       }
       return newSet;
     });
+    // 読み込みに成功した画像をfailedImagesから削除
+    setFailedImages(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(imageId);
+      return newSet;
+    });
+  };
+
+  // 画像の読み込みエラーを処理する関数
+  const handleImageError = (imageId: string) => {
+    setFailedImages(prev => {
+      const newSet = new Set(prev);
+      newSet.add(imageId);
+      return newSet;
+    });
+    console.error(`Failed to load image: ${imageId}`);
+  };
+
+  // 画像の再読み込みを試みる関数
+  const handleRetryLoad = (imageId: string) => {
+    setFailedImages(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(imageId);
+      return newSet;
+    });
+    // 画像のキャッシュをバイパスするためにURLにタイムスタンプを追加
+    const image = images.find(img => img.id === imageId);
+    if (image) {
+      const timestamp = new Date().getTime();
+      image.url = `${image.url}?t=${timestamp}`;
+      setImages([...images]);
+    }
   };
 
   // いいね状態を取得する関数
@@ -102,6 +137,7 @@ export function ImageGrid() {
   // 画像データの取得（ページネーション対応）
   const fetchImages = useCallback(async (pageNum: number) => {
     try {
+      setError(null);
       const from = (pageNum - 1) * (pageNum === 1 ? INITIAL_LOAD_COUNT : LOAD_MORE_COUNT);
       const to = from + (pageNum === 1 ? INITIAL_LOAD_COUNT : LOAD_MORE_COUNT) - 1;
 
@@ -125,6 +161,7 @@ export function ImageGrid() {
       }
     } catch (error) {
       console.error('Error fetching images:', error);
+      setError('画像の読み込みに失敗しました。ネットワーク接続を確認してください。');
       toast({
         title: 'エラー',
         description: '画像の読み込みに失敗しました',
@@ -142,11 +179,11 @@ export function ImageGrid() {
 
   // 無限スクロール
   useEffect(() => {
-    if (inView && !loading && hasMore) {
+    if (inView && !loading && hasMore && !error) {
       setPage(prev => prev + 1);
       fetchImages(page + 1);
     }
-  }, [inView, loading, hasMore, fetchImages, page]);
+  }, [inView, loading, hasMore, fetchImages, page, error]);
 
   // いいね状態の取得
   useEffect(() => {
@@ -230,6 +267,13 @@ export function ImageGrid() {
   return (
     <>
       <div className="container mx-auto px-4 py-8">
+        {error && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
         {loading && page === 1 ? (
           <div className="flex justify-center items-center min-h-[200px]">
             <Loader2 className="h-8 w-8 animate-spin" />
@@ -250,18 +294,36 @@ export function ImageGrid() {
                   <Card className="overflow-hidden group hover:shadow-lg transition-shadow duration-200">
                     <div className="relative">
                       <div className={`${image.aspectRatio} relative overflow-hidden`}>
-                        <Image
-                          src={image.url}
-                          alt={image.title}
-                          fill
-                          quality={75}
-                          className="object-cover transition-transform duration-200 group-hover:scale-105"
-                          sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
-                          onLoad={() => handleImageLoad(image.id)}
-                          loading={index < 4 ? "eager" : "lazy"}
-                          placeholder="blur"
-                          blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDABQODxIPDRQSEBIXFRQdHx4eHRoaHSQrJiEkKic0Ly4vLy4vNDk2ODU4Ni8vQUFBQC9JWTI/SVpwWnGNkY3/2wBDARUXFx4aHR4eHUJBQkFGQ0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkb/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAb/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k="
-                        />
+                        {failedImages.has(image.id) ? (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100">
+                            <AlertCircle className="h-8 w-8 text-red-500 mb-2" />
+                            <p className="text-sm text-gray-500 mb-2">画像の読み込みに失敗しました</p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRetryLoad(image.id);
+                              }}
+                            >
+                              再読み込み
+                            </Button>
+                          </div>
+                        ) : (
+                          <Image
+                            src={image.url}
+                            alt={image.title}
+                            fill
+                            quality={60}
+                            className="object-cover transition-transform duration-200 group-hover:scale-105"
+                            sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                            onLoad={() => handleImageLoad(image.id)}
+                            onError={() => handleImageError(image.id)}
+                            loading={index < 4 ? "eager" : "lazy"}
+                            placeholder="blur"
+                            blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDABQODxIPDRQSEBIXFRQdHx4eHRoaHSQrJiEkKic0Ly4vLy4vNDk2ODU4Ni8vQUFBQC9JWTI/SVpwWnGNkY3/2wBDARUXFx4aHR4eHUJBQkFGQ0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkb/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAb/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k="
+                          />
+                        )}
                       </div>
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors">
                         <button
@@ -283,7 +345,7 @@ export function ImageGrid() {
                 </div>
               ))}
             </Masonry>
-            {hasMore && (
+            {hasMore && !error && (
               <div ref={loadMoreRef} className="flex justify-center mt-8">
                 <Loader2 className="h-8 w-8 animate-spin" />
               </div>

@@ -68,7 +68,6 @@ export function ImageGrid() {
     if (!user || images.length === 0) return;
 
     try {
-      // 全ての画像IDを一度に送信
       const imageIds = images.map(img => img.id);
       const response = await fetch('/api/likes/batch', {
         method: 'POST',
@@ -84,68 +83,109 @@ export function ImageGrid() {
       setLikedImages(new Set(data.likedImageIds));
     } catch (error) {
       console.error('Error fetching like status:', error);
-      // エラー時は静かに失敗（UIへの影響を最小限に）
     }
   }, [user, images]);
 
-  // リアルタイム更新のセットアップ
-  useEffect(() => {
-    if (!user) return;
+  // 画像データの取得を最適化
+  const fetchImages = useCallback(async (pageNum: number) => {
+    try {
+      if (pageNum === 1) {
+        setLoading(true);
+      }
+      
+      setError(null);
+      console.log('Fetching images for page:', pageNum);
+      
+      const { data: images, error: fetchError } = await supabase
+        .from('images')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range((pageNum - 1) * LOAD_MORE_COUNT, pageNum * LOAD_MORE_COUNT - 1);
 
-    const channel = supabase
-      .channel('public:likes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'likes',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setLikedImages(prev => new Set(Array.from(prev).concat(payload.new.image_id)));
-          } else if (payload.eventType === 'DELETE') {
-            setLikedImages(prev => {
-              const newSet = new Set(prev);
-              newSet.delete(payload.old.image_id);
-              return newSet;
-            });
+      if (fetchError) {
+        console.error('Error fetching images:', fetchError);
+        throw fetchError;
+      }
+
+      if (!images || images.length === 0) {
+        console.log('No more images to load');
+        setHasMore(false);
+        setLoading(false);
+        return;
+      }
+
+      console.log('Fetched images:', images.length);
+
+      const processedImages = await Promise.all(
+        images.map(async (image) => {
+          try {
+            if (!image.storage_path) {
+              console.error('Missing storage_path for image:', image);
+              return null;
+            }
+
+            const { data: signedUrlData, error: signedUrlError } = await supabase
+              .storage
+              .from('photo-gallery-images')
+              .createSignedUrl(image.storage_path, 3600);
+
+            if (signedUrlError || !signedUrlData?.signedUrl) {
+              console.error('Error getting signed URL:', signedUrlError);
+              return null;
+            }
+
+            return {
+              ...image,
+              url: signedUrlData.signedUrl,
+              size: Math.random() > 0.2 ? 'normal' : 'large',
+              aspectRatio: getRandomAspectRatio(Math.random() > 0.2 ? 'normal' : 'large')
+            };
+          } catch (error) {
+            console.error('Error processing image:', image.id, error);
+            return null;
           }
-        }
-      )
-      .subscribe();
+        })
+      );
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, supabase]);
+      const validImages = processedImages.filter((img): img is ImageType => img !== null);
+      console.log('Valid processed images:', validImages.length);
 
-  // いいね状態の取得タイミングを調整
-  useEffect(() => {
-    if (user && !loading) {
-      fetchLikeStatus();
-    }
-  }, [user, loading, fetchLikeStatus]);
+      if (validImages.length === 0) {
+        setError('画像の読み込みに失敗しました。');
+        setLoading(false);
+        return;
+      }
 
-  // 画像の読み込み完了を追跡する関数を最適化
-  const handleImageLoad = useCallback((imageId: string) => {
-    loadedImagesRef.current.add(imageId);
-    
-    // 最初の数枚が読み込まれたらローディング状態を解除
-    if (loadedImagesRef.current.size >= 4 || loadedImagesRef.current.size === images.length) {
+      setImages(prev => pageNum === 1 ? validImages : [...prev, ...validImages]);
+      setHasMore(validImages.length === LOAD_MORE_COUNT);
+      setLoading(false);
+
+      if (user) {
+        fetchLikeStatus();
+      }
+    } catch (error) {
+      console.error('Error in fetchImages:', error);
+      setError('画像の読み込みに失敗しました。');
       setLoading(false);
     }
+  }, [supabase, user, fetchLikeStatus]);
 
-    // 読み込みに成功した画像をfailedImagesから削除
+  // 画像の読み込み完了を追跡する関数
+  const handleImageLoad = useCallback((imageId: string) => {
+    setLoadedImages(prev => {
+      const newSet = new Set(prev);
+      newSet.add(imageId);
+      return newSet;
+    });
+
     setFailedImages(prev => {
       const newSet = new Set(prev);
       newSet.delete(imageId);
       return newSet;
     });
-  }, [images.length]);
+  }, []);
 
-  // 画像の読み込みエラーを処理する関数を最適化
+  // 画像の読み込みエラーを処理する関数
   const handleImageError = useCallback((imageId: string) => {
     console.error(`Failed to load image: ${imageId}`);
     setFailedImages(prev => new Set(prev).add(imageId));
@@ -204,115 +244,45 @@ export function ImageGrid() {
     await fetchImages(1);
   };
 
-  // 画像データの取得を最適化
-  const fetchImages = useCallback(async (pageNum: number) => {
-    try {
-      if (pageNum === 1) {
-        setLoading(true);
-        loadedImagesRef.current = new Set();
-      }
-      
-      setError(null);
-      const from = (pageNum - 1) * (pageNum === 1 ? INITIAL_LOAD_COUNT : LOAD_MORE_COUNT);
-      
-      const { count: totalCount } = await supabase
-        .from('images')
-        .select('*', { count: 'exact', head: true });
+  // リアルタイム更新のセットアップ
+  useEffect(() => {
+    if (!user) return;
 
-      if (totalCount === null || from >= totalCount) {
-        setHasMore(false);
-        setLoading(false);
-        return;
-      }
-
-      const to = Math.min(from + (pageNum === 1 ? INITIAL_LOAD_COUNT : LOAD_MORE_COUNT) - 1, totalCount - 1);
-
-      const { data, error: fetchError } = await supabase
-        .from('images')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .range(from, to);
-
-      if (fetchError) throw fetchError;
-
-      if (data) {
-        console.log('Fetched images:', data);
-
-        const imagesWithSignedUrls = await Promise.all(
-          data.map(async (image) => {
-            try {
-              if (!image.storage_path) {
-                console.error('Missing storage_path for image:', image);
-                throw new Error('Missing storage_path');
-              }
-
-              const { data: signedUrlData, error: signedUrlError } = await supabase
-                .storage
-                .from('photo-gallery-images')
-                .createSignedUrl(image.storage_path, 3600);
-
-              if (signedUrlError) {
-                console.error('Error getting signed URL:', signedUrlError);
-                throw signedUrlError;
-              }
-
-              if (!signedUrlData?.signedUrl) {
-                console.error('No signed URL returned for image:', image);
-                throw new Error('No signed URL returned');
-              }
-
-              return {
-                ...image,
-                url: signedUrlData.signedUrl,
-                size: Math.random() > 0.2 ? 'normal' : 'large',
-                aspectRatio: getRandomAspectRatio(Math.random() > 0.2 ? 'normal' : 'large')
-              };
-            } catch (error) {
-              console.error('Error processing image:', image.id, error);
-              return null;
-            }
-          })
-        );
-
-        // フィルタリングして、エラーのあった画像を除外
-        const validImages = imagesWithSignedUrls.filter((img): img is ImageType => img !== null);
-        console.log('Valid images with URLs:', validImages);
-
-        if (validImages.length === 0) {
-          setError('画像の読み込みに失敗しました。');
-          setLoading(false);
-          return;
+    const channel = supabase
+      .channel('public:likes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'likes',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setLikedImages(prev => new Set(Array.from(prev).concat(payload.new.image_id)));
+          } else if (payload.eventType === 'DELETE') {
+            setLikedImages(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(payload.old.image_id);
+              return newSet;
+            });
+          }
         }
+      )
+      .subscribe();
 
-        setImages(prev => {
-          const newImages = pageNum === 1 ? validImages : [...prev, ...validImages];
-          return newImages;
-        });
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, supabase]);
 
-        // 最初のページで、かつ画像が存在する場合はローディングを解除
-        if (pageNum === 1 && validImages.length > 0) {
-          setLoading(false);
-        }
-        
-        setHasMore(to < totalCount - 1);
-        setRetryCount(0);
-
-        // いいね状態を更新
-        if (user) {
-          fetchLikeStatus();
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching images:', error);
-      setError('画像の読み込みに失敗しました。ネットワーク接続を確認してください。');
-      toast({
-        title: 'エラー',
-        description: '画像の読み込みに失敗しました',
-        variant: 'destructive',
-      });
-      setLoading(false);
+  // いいね状態の取得タイミングを調整
+  useEffect(() => {
+    if (user && !loading) {
+      fetchLikeStatus();
     }
-  }, [supabase, toast, user, fetchLikeStatus]);
+  }, [user, loading, fetchLikeStatus]);
 
   // 初回読み込み
   useEffect(() => {

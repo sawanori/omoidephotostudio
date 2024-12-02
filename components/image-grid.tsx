@@ -17,6 +17,26 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 const LOAD_MORE_COUNT = 12;
 
+// アスペクト比の設定を調整する関数
+const getRandomAspectRatio = (size: 'normal' | 'large') => {
+  if (size === 'large') {
+    const ratios = ['aspect-[16/9]', 'aspect-square'];
+    return ratios[Math.floor(Math.random() * ratios.length)];
+  }
+
+  const ratios = [
+    { class: 'aspect-[3/4]', weight: 2 },
+    { class: 'aspect-[4/3]', weight: 1 },
+    { class: 'aspect-square', weight: 1 }
+  ];
+
+  const weightedRatios = ratios.flatMap(ratio => 
+    Array(ratio.weight).fill(ratio.class)
+  );
+
+  return weightedRatios[Math.floor(Math.random() * weightedRatios.length)];
+};
+
 export function ImageGrid() {
   const [images, setImages] = useState<ImageType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,7 +82,49 @@ export function ImageGrid() {
     }
   }, [user, images]);
 
-  // 画像データの取得
+  // リアルタイム更新のセットアップ
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('likes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'likes',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setLikedImages(prev => new Set([...Array.from(prev), payload.new.image_id]));
+          } else if (payload.eventType === 'DELETE') {
+            setLikedImages(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(payload.old.image_id);
+              return newSet;
+            });
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('Realtime subscription status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, supabase]);
+
+  // いいね状態の取得タイミングを調整
+  useEffect(() => {
+    if (user && !loading) {
+      fetchLikeStatus();
+    }
+  }, [user, loading, fetchLikeStatus]);
+
+  // 画像データの取得を最適化
   const fetchImages = useCallback(async (pageNum: number) => {
     try {
       if (pageNum === 1) {
@@ -92,36 +154,50 @@ export function ImageGrid() {
 
       console.log('Fetched images:', images.length);
 
-      const processedImages = await Promise.all(
-        images.map(async (image) => {
-          try {
+      // バッチ処理で署名付きURLを生成
+      const batchSize = 3; // 一度に処理する画像の数を制限
+      const processedImages = [];
+      
+      for (let i = 0; i < images.length; i += batchSize) {
+        const batch = images.slice(i, i + batchSize);
+        const batchResults = await Promise.all(
+          batch.map(async (image) => {
             if (!image.storage_path) {
               console.error('Missing storage_path for image:', image);
               return null;
             }
 
-            const { data: signedUrlData, error: signedUrlError } = await supabase
-              .storage
-              .from('photo-gallery-images')
-              .createSignedUrl(image.storage_path, 3600);
+            try {
+              const { data: signedUrlData, error: signedUrlError } = await supabase
+                .storage
+                .from('photo-gallery-images')
+                .createSignedUrl(image.storage_path, 3600);
 
-            if (signedUrlError || !signedUrlData?.signedUrl) {
-              console.error('Error getting signed URL:', signedUrlError);
+              if (signedUrlError) {
+                console.error('Error getting signed URL:', signedUrlError);
+                return null;
+              }
+
+              return {
+                ...image,
+                url: signedUrlData.signedUrl,
+                size: Math.random() > 0.2 ? 'normal' : 'large',
+                aspectRatio: getRandomAspectRatio(Math.random() > 0.2 ? 'normal' : 'large')
+              };
+            } catch (error) {
+              console.error('Error processing image:', image.id, error);
               return null;
             }
+          })
+        );
 
-            return {
-              ...image,
-              url: signedUrlData.signedUrl,
-              size: Math.random() > 0.2 ? 'normal' : 'large',
-              aspectRatio: getRandomAspectRatio(Math.random() > 0.2 ? 'normal' : 'large')
-            };
-          } catch (error) {
-            console.error('Error processing image:', image.id, error);
-            return null;
-          }
-        })
-      );
+        processedImages.push(...batchResults);
+
+        // バッチ間で少し待機してレート制限を回避
+        if (i + batchSize < images.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
 
       const validImages = processedImages.filter((img): img is ImageType => img !== null);
       console.log('Valid processed images:', validImages.length);
@@ -132,7 +208,15 @@ export function ImageGrid() {
         return;
       }
 
-      setImages(prev => pageNum === 1 ? validImages : [...prev, ...validImages]);
+      setImages(prev => {
+        const newImages = pageNum === 1 ? validImages : [...prev, ...validImages];
+        // 重複を除去
+        const uniqueImages = Array.from(
+          new Map(newImages.map(img => [img.id, img])).values()
+        );
+        return uniqueImages;
+      });
+
       setHasMore(validImages.length === LOAD_MORE_COUNT);
       setLoading(false);
 
@@ -181,26 +265,6 @@ export function ImageGrid() {
       fetchImages(page + 1);
     }
   }, [inView, loading, hasMore, fetchImages, page, error]);
-
-  // アスペクト比の設定を調整
-  const getRandomAspectRatio = (size: 'normal' | 'large') => {
-    if (size === 'large') {
-      const ratios = ['aspect-[16/9]', 'aspect-square'];
-      return ratios[Math.floor(Math.random() * ratios.length)];
-    }
-
-    const ratios = [
-      { class: 'aspect-[3/4]', weight: 2 },
-      { class: 'aspect-[4/3]', weight: 1 },
-      { class: 'aspect-square', weight: 1 }
-    ];
-
-    const weightedRatios = ratios.flatMap(ratio => 
-      Array(ratio.weight).fill(ratio.class)
-    );
-
-    return weightedRatios[Math.floor(Math.random() * weightedRatios.length)];
-  };
 
   const handleLike = async (imageId: string, event: React.MouseEvent) => {
     event.stopPropagation();

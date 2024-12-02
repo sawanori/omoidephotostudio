@@ -3,7 +3,7 @@
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import Masonry from 'react-masonry-css';
 import Image from 'next/image';
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Card } from '@/components/ui/card';
 import { Heart, Loader2, AlertCircle } from 'lucide-react';
@@ -15,10 +15,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { useLikeStore } from '@/lib/store/like-store';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
-const INITIAL_LOAD_COUNT = 8;
-const LOAD_MORE_COUNT = 6;
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 2000; // 2秒
+const LOAD_MORE_COUNT = 12;
 
 export function ImageGrid() {
   const [images, setImages] = useState<ImageType[]>([]);
@@ -41,29 +38,8 @@ export function ImageGrid() {
   const { toast } = useToast();
   const [likedImages, setLikedImages] = useState<Set<string>>(new Set());
   const [loadingLikes, setLoadingLikes] = useState<Set<string>>(new Set());
-  const loadedImagesRef = useRef<Set<string>>(new Set());
 
-  // アスペクト比の設定を調整
-  const getRandomAspectRatio = (size: 'normal' | 'large') => {
-    if (size === 'large') {
-      const ratios = ['aspect-[16/9]', 'aspect-square'];
-      return ratios[Math.floor(Math.random() * ratios.length)];
-    }
-
-    const ratios = [
-      { class: 'aspect-[3/4]', weight: 2 },
-      { class: 'aspect-[4/3]', weight: 1 },
-      { class: 'aspect-square', weight: 1 }
-    ];
-
-    const weightedRatios = ratios.flatMap(ratio => 
-      Array(ratio.weight).fill(ratio.class)
-    );
-
-    return weightedRatios[Math.floor(Math.random() * weightedRatios.length)];
-  };
-
-  // いいね状態を取得する関数を最適化
+  // いいね状態を取得する関数
   const fetchLikeStatus = useCallback(async () => {
     if (!user || images.length === 0) return;
 
@@ -86,7 +62,7 @@ export function ImageGrid() {
     }
   }, [user, images]);
 
-  // 画像データの取得を最適化
+  // 画像データの取得
   const fetchImages = useCallback(async (pageNum: number) => {
     try {
       if (pageNum === 1) {
@@ -191,99 +167,6 @@ export function ImageGrid() {
     setFailedImages(prev => new Set(prev).add(imageId));
   }, []);
 
-  // 画像の再読み込みを試みる関数を最適化
-  const handleRetryLoad = useCallback(async (imageId: string) => {
-    try {
-      setFailedImages(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(imageId);
-        return newSet;
-      });
-
-      const image = images.find(img => img.id === imageId);
-      if (!image?.storage_path) {
-        throw new Error('Image storage path not found');
-      }
-
-      const { data: imageData, error: imageError } = await supabase
-        .storage
-        .from('photo-gallery-images')
-        .createSignedUrl(image.storage_path, 3600);
-
-      if (imageError) throw imageError;
-
-      setImages(prev => prev.map(img => 
-        img.id === imageId 
-          ? { ...img, url: imageData.signedUrl }
-          : img
-      ));
-
-    } catch (error) {
-      console.error('Error retrying image load:', error);
-      handleImageError(imageId);
-    }
-  }, [images, supabase, handleImageError]);
-
-  // 全体の再読み込みを試みる関数
-  const handleRetryAll = async () => {
-    if (retryCount >= MAX_RETRIES) {
-      toast({
-        title: 'エラー',
-        description: '読み込みに失敗しました。時間をおいて再度お試しください。',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setRetryCount(prev => prev + 1);
-    setError(null);
-    setLoading(true);
-    
-    // 少し待ってから再試行
-    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-    await fetchImages(1);
-  };
-
-  // リアルタイム更新のセットアップ
-  useEffect(() => {
-    if (!user) return;
-
-    const channel = supabase
-      .channel('public:likes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'likes',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setLikedImages(prev => new Set(Array.from(prev).concat(payload.new.image_id)));
-          } else if (payload.eventType === 'DELETE') {
-            setLikedImages(prev => {
-              const newSet = new Set(prev);
-              newSet.delete(payload.old.image_id);
-              return newSet;
-            });
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, supabase]);
-
-  // いいね状態の取得タイミングを調整
-  useEffect(() => {
-    if (user && !loading) {
-      fetchLikeStatus();
-    }
-  }, [user, loading, fetchLikeStatus]);
-
   // 初回読み込み
   useEffect(() => {
     console.log('Initial fetch triggered');
@@ -299,14 +182,24 @@ export function ImageGrid() {
     }
   }, [inView, loading, hasMore, fetchImages, page, error]);
 
-  const handleImageClick = (index: number) => {
-    setSelectedImageIndex(index);
-    setIsModalOpen(true);
-  };
+  // アスペクト比の設定を調整
+  const getRandomAspectRatio = (size: 'normal' | 'large') => {
+    if (size === 'large') {
+      const ratios = ['aspect-[16/9]', 'aspect-square'];
+      return ratios[Math.floor(Math.random() * ratios.length)];
+    }
 
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setSelectedImageIndex(-1);
+    const ratios = [
+      { class: 'aspect-[3/4]', weight: 2 },
+      { class: 'aspect-[4/3]', weight: 1 },
+      { class: 'aspect-square', weight: 1 }
+    ];
+
+    const weightedRatios = ratios.flatMap(ratio => 
+      Array(ratio.weight).fill(ratio.class)
+    );
+
+    return weightedRatios[Math.floor(Math.random() * weightedRatios.length)];
   };
 
   const handleLike = async (imageId: string, event: React.MouseEvent) => {
@@ -379,14 +272,6 @@ export function ImageGrid() {
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
               {error}
-              <Button
-                variant="link"
-                className="ml-2 text-sm underline"
-                onClick={handleRetryAll}
-                disabled={retryCount >= MAX_RETRIES}
-              >
-                再読み込みする
-              </Button>
             </AlertDescription>
           </Alert>
         )}
@@ -406,7 +291,10 @@ export function ImageGrid() {
                 <div 
                   key={`${image.id}-${image.url}`} 
                   className="mb-4 cursor-pointer"
-                  onClick={() => handleImageClick(images.findIndex(img => img.id === image.id))}
+                  onClick={() => {
+                    setSelectedImageIndex(images.findIndex(img => img.id === image.id));
+                    setIsModalOpen(true);
+                  }}
                 >
                   <Card className="overflow-hidden group hover:shadow-lg transition-shadow duration-200">
                     <div className="relative">
@@ -420,7 +308,7 @@ export function ImageGrid() {
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleRetryLoad(image.id);
+                                handleImageError(image.id);
                               }}
                             >
                               再読み込み
@@ -473,7 +361,10 @@ export function ImageGrid() {
           images={images}
           initialIndex={selectedImageIndex}
           isOpen={isModalOpen}
-          onClose={handleCloseModal}
+          onClose={() => {
+            setIsModalOpen(false);
+            setSelectedImageIndex(-1);
+          }}
         />
       )}
     </>

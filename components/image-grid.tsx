@@ -267,6 +267,12 @@ export function ImageGrid() {
       newSet.add(imageId);
       return newSet;
     });
+    setError(null);
+    setFailedImages(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(imageId);
+      return newSet;
+    });
   }, []);
 
   // 画像の読み込みエラーを処理する関数
@@ -355,7 +361,7 @@ export function ImageGrid() {
   return (
     <>
       <div className="container mx-auto px-4 py-8">
-        {error && (
+        {error && failedImages.size > 0 && (
           <Alert variant="destructive" className="mb-4">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>

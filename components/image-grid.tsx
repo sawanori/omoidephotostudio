@@ -3,7 +3,7 @@
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import Masonry from 'react-masonry-css';
 import Image from 'next/image';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Card } from '@/components/ui/card';
 import { Heart, Loader2, AlertCircle } from 'lucide-react';
@@ -16,6 +16,11 @@ import { useLikeStore } from '@/lib/store/like-store';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 const LOAD_MORE_COUNT = 12;
+const RETRY_DELAY = 1000;
+const MAX_RETRIES = 3;
+
+// URLキャッシュ
+const urlCache = new Map<string, { url: string; expires: number }>();
 
 // アスペクト比の設定を調整する関数
 const getRandomAspectRatio = (size: 'normal' | 'large') => {
@@ -37,6 +42,51 @@ const getRandomAspectRatio = (size: 'normal' | 'large') => {
   return weightedRatios[Math.floor(Math.random() * weightedRatios.length)];
 };
 
+// 署名付きURLを取得する関数（キャッシュとリトライ機能付き）
+const getSignedUrl = async (
+  supabase: any,
+  storagePath: string,
+  retryCount = 0
+): Promise<string | null> => {
+  // キャッシュをチェック
+  const cached = urlCache.get(storagePath);
+  if (cached && cached.expires > Date.now()) {
+    return cached.url;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .storage
+      .from('photo-gallery-images')
+      .createSignedUrl(storagePath, 3600);
+
+    if (error) {
+      if (retryCount < MAX_RETRIES) {
+        console.log(`Retrying signed URL generation for ${storagePath} (attempt ${retryCount + 1})`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
+        return getSignedUrl(supabase, storagePath, retryCount + 1);
+      }
+      throw error;
+    }
+
+    if (data?.signedUrl) {
+      // キャッシュに保存（1時間 - 5分の有効期限）
+      urlCache.set(storagePath, {
+        url: data.signedUrl,
+        expires: Date.now() + (3600 - 300) * 1000
+      });
+      return data.signedUrl;
+    }
+  } catch (error) {
+    console.error('Error getting signed URL:', error);
+    if (retryCount < MAX_RETRIES) {
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
+      return getSignedUrl(supabase, storagePath, retryCount + 1);
+    }
+  }
+  return null;
+};
+
 export function ImageGrid() {
   const [images, setImages] = useState<ImageType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,6 +96,8 @@ export function ImageGrid() {
   const [error, setError] = useState<string | null>(null);
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
   const [retryCount, setRetryCount] = useState(0);
+  const processingRef = useRef(false);
+
   const { ref: loadMoreRef, inView } = useInView({
     threshold: 0,
     rootMargin: '100px',
@@ -131,8 +183,7 @@ export function ImageGrid() {
         setLoading(true);
       }
       
-      setError(null);
-      console.log('Fetching images for page:', pageNum);
+      console.log('開始: 画像データの取得', { pageNum });
       
       const { data: images, error: fetchError } = await supabase
         .from('images')
@@ -141,18 +192,27 @@ export function ImageGrid() {
         .range((pageNum - 1) * LOAD_MORE_COUNT, pageNum * LOAD_MORE_COUNT - 1);
 
       if (fetchError) {
-        console.error('Error fetching images:', fetchError);
+        console.error('Supabaseからのデータ取得エラー:', fetchError);
         throw fetchError;
       }
 
+      console.log('取得した画像データ:', images);
+
       if (!images || images.length === 0) {
-        console.log('No more images to load');
+        console.log('画像データが存在しません');
         setHasMore(false);
         setLoading(false);
         return;
       }
 
-      console.log('Fetched images:', images.length);
+      // 以下のログを追加
+      console.log('画像の処理開始');
+      for (const image of images) {
+        console.log('画像情報:', {
+          id: image.id,
+          storage_path: image.storage_path,
+        });
+      }
 
       // バッチ処理で署名付きURLを生成
       const batchSize = 3; // 一度に処理する画像の数を制限
@@ -224,7 +284,7 @@ export function ImageGrid() {
         fetchLikeStatus();
       }
     } catch (error) {
-      console.error('Error in fetchImages:', error);
+      console.error('fetchImagesでエラー発生:', error);
       setError('画像の読み込みに失敗しました。');
       setLoading(false);
     }
@@ -232,22 +292,17 @@ export function ImageGrid() {
 
   // 画像の読み込み完了を追跡する関数
   const handleImageLoad = useCallback((imageId: string) => {
+    console.log('画像読み込み完了:', imageId);
     setLoadedImages(prev => {
       const newSet = new Set(prev);
       newSet.add(imageId);
-      return newSet;
-    });
-
-    setFailedImages(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(imageId);
       return newSet;
     });
   }, []);
 
   // 画像の読み込みエラーを処理する関数
   const handleImageError = useCallback((imageId: string) => {
-    console.error(`Failed to load image: ${imageId}`);
+    console.error('画像読み込みエラー:', imageId);
     setFailedImages(prev => new Set(prev).add(imageId));
   }, []);
 

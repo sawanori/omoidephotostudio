@@ -183,8 +183,24 @@ export function ImageGrid() {
         setLoading(true);
       }
       
-      console.log('開始: 画像データの取得', { pageNum });
+      console.log('画像取得開始:', pageNum);
       
+      // 1. まずデータが存在するか確認
+      const { count } = await supabase
+      
+        .from('images')
+        .select('*', { count: 'exact', head: true });
+        
+      console.log('総画像数:', count);
+
+      if (count === 0) {
+        console.log('画像が存在しません');
+        setLoading(false);
+        setHasMore(false);
+        return;
+      }
+
+      // 2. 画像データの取得
       const { data: images, error: fetchError } = await supabase
         .from('images')
         .select('*')
@@ -192,103 +208,56 @@ export function ImageGrid() {
         .range((pageNum - 1) * LOAD_MORE_COUNT, pageNum * LOAD_MORE_COUNT - 1);
 
       if (fetchError) {
-        console.error('Supabaseからのデータ取得エラー:', fetchError);
+        console.error('データ取得エラー:', fetchError);
         throw fetchError;
       }
 
-      console.log('取得した画像データ:', images);
+      console.log('取得した画像:', images);
 
-      if (!images || images.length === 0) {
-        console.log('画像データが存在しません');
-        setHasMore(false);
-        setLoading(false);
-        return;
-      }
+      // 3. 署名付きURLの生成
+      const processedImages = await Promise.all(
+        images.map(async (image) => {
+          try {
+            const { data: urlData, error: urlError } = await supabase
+              .storage
+              .from('photo-gallery-images')
+              .createSignedUrl(image.storage_path, 3600);
 
-      // 以下のログを追加
-      console.log('画像の処理開始');
-      for (const image of images) {
-        console.log('画像情報:', {
-          id: image.id,
-          storage_path: image.storage_path,
-        });
-      }
+            if (urlError) {
+              console.error('URL生成エラー:', urlError);
+              return null;
+            }
 
-      // バッチ処理で署名付きURLを生成
-      const batchSize = 3; // 一度に処理する画像の数を制限
-      const processedImages = [];
+            return {
+              ...image,
+              url: urlData.signedUrl,
+              aspectRatio: getRandomAspectRatio('normal')
+            };
+          } catch (error) {
+            console.error('画像処理エラー:', error);
+            return null;
+          }
+        })
+      );
+
+      const validImages = processedImages.filter(img => img !== null);
       
-      for (let i = 0; i < images.length; i += batchSize) {
-        const batch = images.slice(i, i + batchSize);
-        const batchResults = await Promise.all(
-          batch.map(async (image) => {
-            if (!image.storage_path) {
-              console.error('Missing storage_path for image:', image);
-              return null;
-            }
-
-            try {
-              const { data: signedUrlData, error: signedUrlError } = await supabase
-                .storage
-                .from('photo-gallery-images')
-                .createSignedUrl(image.storage_path, 3600);
-
-              if (signedUrlError) {
-                console.error('Error getting signed URL:', signedUrlError);
-                return null;
-              }
-
-              return {
-                ...image,
-                url: signedUrlData.signedUrl,
-                size: Math.random() > 0.2 ? 'normal' : 'large',
-                aspectRatio: getRandomAspectRatio(Math.random() > 0.2 ? 'normal' : 'large')
-              };
-            } catch (error) {
-              console.error('Error processing image:', image.id, error);
-              return null;
-            }
-          })
-        );
-
-        processedImages.push(...batchResults);
-
-        // バッチ間で少し待機してレート制限を回避
-        if (i + batchSize < images.length) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      }
-
-      const validImages = processedImages.filter((img): img is ImageType => img !== null);
-      console.log('Valid processed images:', validImages.length);
-
       if (validImages.length === 0) {
-        setError('画像の読み込みに失敗しました。');
+        setError('画像の読み込みに失敗しました');
         setLoading(false);
         return;
       }
 
-      setImages(prev => {
-        const newImages = pageNum === 1 ? validImages : [...prev, ...validImages];
-        // 重複を除去
-        const uniqueImages = Array.from(
-          new Map(newImages.map(img => [img.id, img])).values()
-        );
-        return uniqueImages;
-      });
-
+      setImages(prev => pageNum === 1 ? validImages : [...prev, ...validImages]);
       setHasMore(validImages.length === LOAD_MORE_COUNT);
       setLoading(false);
 
-      if (user) {
-        fetchLikeStatus();
-      }
     } catch (error) {
-      console.error('fetchImagesでエラー発生:', error);
-      setError('画像の読み込みに失敗しました。');
+      console.error('fetchImages エラー:', error);
+      setError('画像の読み込みに失敗しました');
       setLoading(false);
     }
-  }, [supabase, user, fetchLikeStatus]);
+  }, [supabase]);
 
   // 画像の読み込み完了を追跡する関数
   const handleImageLoad = useCallback((imageId: string) => {
